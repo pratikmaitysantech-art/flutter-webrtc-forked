@@ -55,6 +55,12 @@ class MlVideoProcessor(
 
     // ML Kit face detector instance tuned for real-time performance.
     private val faceDetector: FaceDetector
+    
+    // MODIFIED: Add counters for logging
+    @Volatile
+    private var frameCount: Long = 0
+    @Volatile
+    private var noFaceCount: Long = 0
 
     init {
         thread.start()
@@ -65,9 +71,11 @@ class MlVideoProcessor(
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
             .setContourMode(FaceDetectorOptions.CONTOUR_MODE_ALL)
+            .setMinFaceSize(0.1f) // MODIFIED: Set minimum face size to 10% of image to detect smaller faces
             .build()
 
         faceDetector = FaceDetection.getClient(realTimeOpts)
+        Log.i(TAG, "MlVideoProcessor initialized - Face detection will start automatically when video track is created")
     }
 
     /**
@@ -90,10 +98,16 @@ class MlVideoProcessor(
         val height = i420.height
         val rotation = frame.rotation
 
+        // MODIFIED: Add periodic logging for frame processing (every 30 frames to avoid spam)
+        frameCount++
+        if (frameCount % 30 == 0) {
+            Log.d(TAG, "Processing frame #$frameCount: ${width}x${height}, rotation=$rotation")
+        }
+
         val inputImage = try {
             inputImageFromI420(i420, rotation)
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to convert I420 frame to InputImage", e)
+            Log.e(TAG, "Failed to convert I420 frame to InputImage (${width}x${height}, rotation=$rotation)", e)
             i420.release()
             return frame
         }
@@ -119,7 +133,23 @@ class MlVideoProcessor(
             .process(inputImage)
             .addOnSuccessListener { faces ->
                 if (faces.isNotEmpty()) {
-                    Log.d(TAG, "Face detection success: ${faces.size} face(s)")
+                    // MODIFIED: Enhanced logging with detailed face information
+                    Log.i(TAG, "✅ FACE DETECTED! Count: ${faces.size} face(s) in ${width}x${height} frame")
+                    
+                    faces.forEachIndexed { index, face ->
+                        val bbox = face.boundingBox
+                        val faceWidth = bbox.width()
+                        val faceHeight = bbox.height()
+                        val centerX = bbox.centerX()
+                        val centerY = bbox.centerY()
+                        
+                        Log.i(TAG, "  Face #${index + 1}: " +
+                                "BoundingBox(left=${bbox.left}, top=${bbox.top}, right=${bbox.right}, bottom=${bbox.bottom}), " +
+                                "Size(${faceWidth}x${faceHeight}), " +
+                                "Center(${centerX}, ${centerY}), " +
+                                "Area=${faceWidth * faceHeight}px²")
+                    }
+                    
                     listener?.onFacesDetected(faces, frame)
 
                     // This is the hook where mask rendering can be implemented
@@ -135,12 +165,16 @@ class MlVideoProcessor(
                     // and can be implemented on top of this callback.
                     renderMasksIfNeeded(faces, width, height)
                 } else {
-                    Log.d(TAG, "No faces detected in current frame")
+                    // MODIFIED: Only log "no faces" periodically to reduce spam
+                    noFaceCount++
+                    if (noFaceCount % 30 == 0) {
+                        Log.d(TAG, "No faces detected (checked $noFaceCount frames, frame size: ${width}x${height})")
+                    }
                     listener?.onNoFacesDetected(frame)
                 }
             }
             .addOnFailureListener { e ->
-                Log.e(TAG, "Face detection failed", e)
+                Log.e(TAG, "Face detection failed for ${width}x${height} frame", e)
             }
     }
 
@@ -200,11 +234,24 @@ class MlVideoProcessor(
         // Remove any leading zeros to avoid shifted images.
         val cleanedArray = Arrays.copyOfRange(yuvBuffer.array(), 0, minSize)
 
+        // MODIFIED: Normalize rotation to ML Kit's expected values (0, 90, 180, 270)
+        // WebRTC uses 0, 90, 180, 270 degrees, which matches ML Kit's format
+        val normalizedRotation = when {
+            rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270 -> rotation
+            rotation < 0 -> ((rotation % 360) + 360) % 360
+            else -> rotation % 360
+        }
+        
+        // Log rotation info periodically for debugging
+        if (frameCount % 60 == 0) {
+            Log.d(TAG, "Image conversion: ${width}x${height}, WebRTC rotation=$rotation°, normalized=$normalizedRotation°")
+        }
+
         return InputImage.fromByteArray(
             cleanedArray,
             width,
             height,
-            rotation,
+            normalizedRotation,
             ImageFormat.NV21
         )
     }
@@ -231,3 +278,6 @@ class MlVideoProcessor(
         private const val TAG = "MlVideoProcessor"
     }
 }
+// NEW ADDITION END
+
+
