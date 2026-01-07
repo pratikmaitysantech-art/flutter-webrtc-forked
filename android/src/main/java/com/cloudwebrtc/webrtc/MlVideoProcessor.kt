@@ -231,8 +231,13 @@ class MlVideoProcessor(
             height
         )
 
-        // Remove any leading zeros to avoid shifted images.
-        val cleanedArray = Arrays.copyOfRange(yuvBuffer.array(), 0, minSize)
+        // MODIFIED: Remove any leading zeros to avoid shifted images.
+        // Use arrayOffset() like in FrameCapturer.java to handle ByteBuffer offsets correctly
+        val cleanedArray = Arrays.copyOfRange(
+            yuvBuffer.array(), 
+            yuvBuffer.arrayOffset(), 
+            yuvBuffer.arrayOffset() + minSize
+        )
 
         // MODIFIED: Normalize rotation to ML Kit's expected values (0, 90, 180, 270)
         // WebRTC uses 0, 90, 180, 270 degrees, which matches ML Kit's format
@@ -242,16 +247,33 @@ class MlVideoProcessor(
             else -> rotation % 360
         }
         
+        // MODIFIED: Verify buffer size matches expected NV21 size
+        val expectedSize = width * height * 3 / 2  // Y plane + UV interleaved
+        if (cleanedArray.size != expectedSize) {
+            Log.w(TAG, "⚠️ Buffer size mismatch! Expected: $expectedSize bytes, Got: ${cleanedArray.size} bytes for ${width}x${height}")
+        }
+        
         // Log rotation info periodically for debugging
         if (frameCount % 60L == 0L) {
-            Log.d(TAG, "Image conversion: ${width}x${height}, WebRTC rotation=$rotation°, normalized=$normalizedRotation°")
+            Log.d(TAG, "Image conversion: I420 ${width}x${height} -> NV21 ${width}x${height}, rotation=$rotation° (normalized=$normalizedRotation°)")
+            Log.d(TAG, "  Buffer size: ${cleanedArray.size} bytes, expected: $expectedSize bytes")
+            Log.d(TAG, "  Strides: Y=${strides[0]}, U=${strides[1]}, V=${strides[2]}")
+        }
+
+        // MODIFIED: Try with rotation=0 first to test if rotation is the issue
+        // ML Kit should handle rotation, but let's test with 0 to isolate the problem
+        val testRotation = if (frameCount < 10L) {
+            Log.d(TAG, "🧪 TEST MODE: Using rotation=0 for first 10 frames to test detection")
+            0
+        } else {
+            normalizedRotation
         }
 
         return InputImage.fromByteArray(
             cleanedArray,
             width,
             height,
-            normalizedRotation,
+            testRotation,
             ImageFormat.NV21
         )
     }
