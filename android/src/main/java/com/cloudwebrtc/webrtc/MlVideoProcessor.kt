@@ -79,6 +79,12 @@ class MlVideoProcessor(
         val buffer = frame.buffer
         val i420 = buffer.toI420()
 
+        // MODIFIED: Added null-safety check for I420 buffer conversion.
+        if (i420 == null) {
+            Log.w(TAG, "Failed to convert video frame buffer to I420 format, skipping face detection")
+            return frame
+        }
+
         // Copy width/height before posting to another thread.
         val width = i420.width
         val height = i420.height
