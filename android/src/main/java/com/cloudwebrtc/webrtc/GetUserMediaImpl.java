@@ -813,6 +813,13 @@ public class GetUserMediaImpl {
         mediaStream.addTrack(track);
 
         LocalVideoTrack localVideoTrack = new LocalVideoTrack(track);
+        try {
+            MlVideoProcessor mlVideoProcessor = new MlVideoProcessor(applicationContext, null);
+            localVideoTrack.addProcessor(mlVideoProcessor);
+        } catch (Exception e) {
+            // MODIFIED: Defensive logging only; video capturing continues even if ML fails.
+            Log.e(TAG, "Failed to initialize MlVideoProcessor for face detection", e);
+        }
         videoSource.setVideoProcessor(localVideoTrack);
 
         stateProvider.putLocalTrack(track.id(),localVideoTrack);
