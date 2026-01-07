@@ -1,3 +1,7 @@
+/* CHANGES LOG:
+ * 1. Added: MlVideoProcessor integration to perform background ML Kit face detection on camera video frames.
+ */
+
 package com.cloudwebrtc.webrtc;
 
 import android.Manifest;
@@ -813,13 +817,20 @@ public class GetUserMediaImpl {
         mediaStream.addTrack(track);
 
         LocalVideoTrack localVideoTrack = new LocalVideoTrack(track);
+
+        // NEW ADDITION START
+        // ADDED: Attach MlVideoProcessor so that each captured frame is also sent to
+        // ML Kit for face detection on a background thread.
         try {
             MlVideoProcessor mlVideoProcessor = new MlVideoProcessor(applicationContext, null);
             localVideoTrack.addProcessor(mlVideoProcessor);
+            Log.i(TAG, "✅ Face detection processor attached to video track: " + trackId + " (" + info.width + "x" + info.height + ")");
         } catch (Exception e) {
             // MODIFIED: Defensive logging only; video capturing continues even if ML fails.
-            Log.e(TAG, "Failed to initialize MlVideoProcessor for face detection", e);
+            Log.e(TAG, "❌ Failed to initialize MlVideoProcessor for face detection", e);
         }
+        // NEW ADDITION END
+
         videoSource.setVideoProcessor(localVideoTrack);
 
         stateProvider.putLocalTrack(track.id(),localVideoTrack);
