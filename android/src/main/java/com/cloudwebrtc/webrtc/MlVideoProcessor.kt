@@ -100,7 +100,7 @@ class MlVideoProcessor(
 
         // MODIFIED: Add periodic logging for frame processing (every 30 frames to avoid spam)
         frameCount++
-        if (frameCount % 30 == 0) {
+        if (frameCount % 30L == 0L) {
             Log.d(TAG, "Processing frame #$frameCount: ${width}x${height}, rotation=$rotation")
         }
 
@@ -167,7 +167,7 @@ class MlVideoProcessor(
                 } else {
                     // MODIFIED: Only log "no faces" periodically to reduce spam
                     noFaceCount++
-                    if (noFaceCount % 30 == 0) {
+                    if (noFaceCount % 30L == 0L) {
                         Log.d(TAG, "No faces detected (checked $noFaceCount frames, frame size: ${width}x${height})")
                     }
                     listener?.onNoFacesDetected(frame)
@@ -243,7 +243,7 @@ class MlVideoProcessor(
         }
         
         // Log rotation info periodically for debugging
-        if (frameCount % 60 == 0) {
+        if (frameCount % 60L == 0L) {
             Log.d(TAG, "Image conversion: ${width}x${height}, WebRTC rotation=$rotation°, normalized=$normalizedRotation°")
         }
 
