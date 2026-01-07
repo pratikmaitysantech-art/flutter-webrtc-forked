@@ -66,16 +66,19 @@ class MlVideoProcessor(
         thread.start()
         handler = Handler(thread.looper)
 
+        // MODIFIED: Match the original commit settings exactly
+        // Using ACCURATE mode instead of FAST for better detection, and no minFaceSize constraint
         val realTimeOpts = FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)  // Changed from FAST to ACCURATE
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
             .setContourMode(FaceDetectorOptions.CONTOUR_MODE_ALL)
-            .setMinFaceSize(0.1f) // MODIFIED: Set minimum face size to 10% of image to detect smaller faces
+            // Removed minFaceSize to use default (which is smaller and better for detection)
             .build()
 
         faceDetector = FaceDetection.getClient(realTimeOpts)
         Log.i(TAG, "MlVideoProcessor initialized - Face detection will start automatically when video track is created")
+        Log.i(TAG, "  Face detector settings: PERFORMANCE_MODE_ACCURATE, CONTOUR_MODE_ALL")
     }
 
     /**
@@ -217,63 +220,72 @@ class MlVideoProcessor(
         val chromaHeight = (height + 1) / 2
         val minSize = width * height + chromaWidth * chromaHeight * 2
 
-        // Allocate a heap buffer so we can get the underlying byte[]
-        val yuvBuffer = ByteBuffer.allocate(minSize)
+        // MODIFIED: Use allocateDirect like in the original commit (isqad/flutter-webrtc)
+        // This matches the reference implementation exactly
+        val yuvBuffer = ByteBuffer.allocateDirect(minSize)
 
-        // NOTE: NV21 is like NV12 but with U and V swapped, so we use I420ToNV12
-        // helper and swap U/V buffers accordingly.
+        // NOTE: NV21 is the same as NV12, only that V and U are stored in the reverse order
+        // NV21 (YYYYYYYYY:VUVU)
+        // NV12 (YYYYYYYYY:UVUV)
+        // Therefore we can use the NV12 helper, but swap the U and V input buffers
         YuvHelper.I420ToNV12(
             y, strides[0],
-            v, strides[2],
-            u, strides[1],
+            v, strides[2],  // V first (swapped)
+            u, strides[1],  // U second (swapped)
             yuvBuffer,
             width,
             height
         )
 
-        // MODIFIED: Remove any leading zeros to avoid shifted images.
-        // Use arrayOffset() like in FrameCapturer.java to handle ByteBuffer offsets correctly
-        val cleanedArray = Arrays.copyOfRange(
-            yuvBuffer.array(), 
-            yuvBuffer.arrayOffset(), 
-            yuvBuffer.arrayOffset() + minSize
-        )
-
-        // MODIFIED: Normalize rotation to ML Kit's expected values (0, 90, 180, 270)
-        // WebRTC uses 0, 90, 180, 270 degrees, which matches ML Kit's format
-        val normalizedRotation = when {
-            rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270 -> rotation
-            rotation < 0 -> ((rotation % 360) + 360) % 360
-            else -> rotation % 360
+        // MODIFIED: For some reason the ByteBuffer may have leading 0s. We remove them as
+        // otherwise the image will be shifted. This matches the original commit exactly.
+        val cleanedArray = if (yuvBuffer.hasArray()) {
+            // Heap buffer - use array directly
+            Arrays.copyOfRange(
+                yuvBuffer.array(), 
+                yuvBuffer.arrayOffset(), 
+                yuvBuffer.arrayOffset() + minSize
+            )
+        } else {
+            // Direct buffer - read bytes directly
+            yuvBuffer.position(0)
+            val array = ByteArray(minSize)
+            yuvBuffer.get(array, 0, minSize)
+            array
         }
-        
+
         // MODIFIED: Verify buffer size matches expected NV21 size
         val expectedSize = width * height * 3 / 2  // Y plane + UV interleaved
         if (cleanedArray.size != expectedSize) {
             Log.w(TAG, "⚠️ Buffer size mismatch! Expected: $expectedSize bytes, Got: ${cleanedArray.size} bytes for ${width}x${height}")
         }
         
+        // MODIFIED: Verify image data is not all zeros (which would indicate a conversion problem)
+        var nonZeroCount = 0
+        val sampleSize = minOf(100, cleanedArray.size) // Check first 100 bytes
+        for (i in 0 until sampleSize) {
+            if (cleanedArray[i].toInt() != 0) nonZeroCount++
+        }
+        
         // Log rotation info periodically for debugging
         if (frameCount % 60L == 0L) {
-            Log.d(TAG, "Image conversion: I420 ${width}x${height} -> NV21 ${width}x${height}, rotation=$rotation° (normalized=$normalizedRotation°)")
+            Log.d(TAG, "Image conversion: I420 ${width}x${height} -> NV21 ${width}x${height}, rotation=$rotation°")
             Log.d(TAG, "  Buffer size: ${cleanedArray.size} bytes, expected: $expectedSize bytes")
             Log.d(TAG, "  Strides: Y=${strides[0]}, U=${strides[1]}, V=${strides[2]}")
+            Log.d(TAG, "  Data validation: ${nonZeroCount}/${sampleSize} non-zero bytes in sample (${(nonZeroCount * 100 / sampleSize)}%)")
+            
+            if (nonZeroCount < sampleSize / 10) {
+                Log.w(TAG, "⚠️ WARNING: Image data appears to be mostly zeros! Conversion may be incorrect.")
+            }
         }
 
-        // MODIFIED: Try with rotation=0 first to test if rotation is the issue
-        // ML Kit should handle rotation, but let's test with 0 to isolate the problem
-        val testRotation = if (frameCount < 10L) {
-            Log.d(TAG, "🧪 TEST MODE: Using rotation=0 for first 10 frames to test detection")
-            0
-        } else {
-            normalizedRotation
-        }
-
+        // MODIFIED: Pass rotation directly to ML Kit like in the original commit
+        // ML Kit handles rotation internally, so we don't need to normalize it
         return InputImage.fromByteArray(
             cleanedArray,
             width,
             height,
-            testRotation,
+            rotation,
             ImageFormat.NV21
         )
     }
