@@ -117,6 +117,10 @@ public class GetUserMediaImpl {
     final AudioSamplesInterceptor inputSamplesInterceptor = new AudioSamplesInterceptor();
     private OutputAudioSamplesInterceptor outputSamplesInterceptor = null;
     JavaAudioDeviceModule audioDeviceModule;
+    
+    // NEW ADDITION START - Store MlVideoProcessor instance for later access
+    private MlVideoProcessor currentMlVideoProcessor = null;
+    // NEW ADDITION END
     private final SparseArray<MediaRecorderImpl> mediaRecorders = new SparseArray<>();
     private AudioDeviceInfo preferredInput = null;
     private boolean isTorchOn;
@@ -824,6 +828,7 @@ public class GetUserMediaImpl {
         try {
             MlVideoProcessor mlVideoProcessor = new MlVideoProcessor(applicationContext, null);
             localVideoTrack.addProcessor(mlVideoProcessor);
+            currentMlVideoProcessor = mlVideoProcessor; // MODIFIED: Store reference for later access
             Log.i(TAG, "✅ Face detection processor attached to video track: " + trackId + " (" + info.width + "x" + info.height + ")");
         } catch (Exception e) {
             // MODIFIED: Defensive logging only; video capturing continues even if ML fails.
@@ -1052,4 +1057,15 @@ public class GetUserMediaImpl {
         }
         return -1;
     }
+
+    // NEW ADDITION START - Getter for MlVideoProcessor instance
+    /**
+     * Returns the current MlVideoProcessor instance if face detection is active.
+     * Used by MethodCallHandlerImpl to enable/disable overlay rendering.
+     * @return MlVideoProcessor instance or null if not initialized
+     */
+    public MlVideoProcessor getCurrentMlVideoProcessor() {
+        return currentMlVideoProcessor;
+    }
+    // NEW ADDITION END
 }
