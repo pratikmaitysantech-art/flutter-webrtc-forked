@@ -321,14 +321,53 @@ class MlVideoProcessor(
                     Log.d(TAG, "ML Kit bbox: (${bbox.left}, ${bbox.top}, ${bbox.right}, ${bbox.bottom}), rotation=$rotation, buffer=${width}x${height}")
                 }
                 
-                // MODIFIED: Since we pass rotation=0 to ML Kit, it gives us coordinates
-                // directly in the buffer space - no transformation needed!
-                val (left, top, right, bottom) = Quad(
-                    bbox.left,
-                    bbox.top,
-                    bbox.right,
-                    bbox.bottom
-                )
+                // MODIFIED: Transform coordinates based on rotation
+                // ML Kit returns coordinates in the rotated image space
+                // We need to transform them to the actual buffer space
+                val (left, top, right, bottom) = when (rotation) {
+                    0 -> {
+                        // No rotation needed
+                        Quad(bbox.left, bbox.top, bbox.right, bbox.bottom)
+                    }
+                    90 -> {
+                        // 90° clockwise: portrait to landscape
+                        // Portrait (height×width) -> Landscape (width×height)
+                        Quad(
+                            height - bbox.bottom,
+                            bbox.left,
+                            height - bbox.top,
+                            bbox.right
+                        )
+                    }
+                    180 -> {
+                        // 180° rotation
+                        Quad(
+                            width - bbox.right,
+                            height - bbox.bottom,
+                            width - bbox.left,
+                            height - bbox.top
+                        )
+                    }
+                    270 -> {
+                        // 270° clockwise (90° counter-clockwise): landscape to portrait
+                        // ML Kit sees: portrait (540×960)
+                        // Buffer is: landscape (960×540)
+                        // Transform: swap axes and flip one
+                        // x_buffer = y_portrait
+                        // y_buffer = portrait_width - x_portrait
+                        // But we need to use actual buffer dimensions
+                        Quad(
+                            bbox.top,
+                            height - bbox.right,
+                            bbox.bottom,
+                            height - bbox.left
+                        )
+                    }
+                    else -> {
+                        Log.w(TAG, "Unknown rotation: $rotation")
+                        Quad(bbox.left, bbox.top, bbox.right, bbox.bottom)
+                    }
+                }
                 
                 // DEBUG: Log transformed coordinates
                 if (frameCount % 30L == 0L) {
@@ -515,14 +554,13 @@ class MlVideoProcessor(
             }
         }
 
-        // MODIFIED: Pass rotation=0 to ML Kit so it gives us coordinates in actual buffer space
-        // We'll handle the display rotation in the UI layer if needed
-        // This way, bbox coordinates directly map to the I420 buffer coordinates
+        // MODIFIED: Use the actual rotation from the camera frame
+        // ML Kit needs the rotation to properly detect faces in portrait/landscape
         return InputImage.fromByteArray(
             cleanedArray,
             width,
             height,
-            0,  // Always use 0 rotation - gives us coordinates in buffer space
+            normalizedRotation,
             ImageFormat.NV21
         )
     }
