@@ -11,12 +11,7 @@ package com.cloudwebrtc.webrtc
 // ADDED: Kotlin-based video frame processor that uses ML Kit Face Detection on a background thread.
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.ImageFormat
-import android.graphics.Paint
-import android.graphics.PorterDuff
 import android.graphics.Rect
 import android.os.Handler
 import android.os.HandlerThread
@@ -243,7 +238,8 @@ class MlVideoProcessor(
 
     /**
      * NEW ADDITION: Draw overlay (bounding boxes) on the video frame
-     * This converts I420 -> ARGB Bitmap, draws overlay, then converts back to I420
+     * This draws directly on the Y plane of I420 to create simple overlays
+     * Note: This is a simplified version that draws on luminance only
      */
     private fun drawOverlayOnFrame(
         i420Buffer: VideoFrame.I420Buffer,
@@ -255,125 +251,104 @@ class MlVideoProcessor(
         val height = i420Buffer.height
 
         try {
-            // Step 1: Convert I420 to ARGB bitmap
-            val argbBuffer = ByteBuffer.allocateDirect(width * height * 4)
-            YuvHelper.I420ToABGR(
-                i420Buffer.dataY, i420Buffer.strideY,
-                i420Buffer.dataU, i420Buffer.strideU,
-                i420Buffer.dataV, i420Buffer.strideV,
-                argbBuffer,
-                width,
-                height
-            )
-
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            bitmap.copyPixelsFromBuffer(argbBuffer)
-
-            // Step 2: Draw overlay on bitmap
-            val canvas = Canvas(bitmap)
+            // Get Y, U, V planes
+            val yPlane = i420Buffer.dataY
+            val uPlane = i420Buffer.dataU
+            val vPlane = i420Buffer.dataV
             
-            val facePaint = Paint().apply {
-                color = Color.GREEN
-                style = Paint.Style.STROKE
-                strokeWidth = 8f
-                isAntiAlias = true
-            }
+            // Copy buffers so we can modify them
+            val ySize = width * height
+            val uvSize = ((width + 1) / 2) * ((height + 1) / 2)
+            
+            val newYBuffer = ByteBuffer.allocateDirect(ySize)
+            val newUBuffer = ByteBuffer.allocateDirect(uvSize)
+            val newVBuffer = ByteBuffer.allocateDirect(uvSize)
+            
+            // Copy original data
+            yPlane.position(0)
+            uPlane.position(0)
+            vPlane.position(0)
+            
+            newYBuffer.put(yPlane)
+            newUBuffer.put(uPlane)
+            newVBuffer.put(vPlane)
+            
+            newYBuffer.rewind()
+            newUBuffer.rewind()
+            newVBuffer.rewind()
 
-            val cornerPaint = Paint().apply {
-                color = Color.YELLOW
-                style = Paint.Style.STROKE
-                strokeWidth = 8f
-                isAntiAlias = true
-            }
-
-            val centerPaint = Paint().apply {
-                color = Color.RED
-                style = Paint.Style.FILL
-                isAntiAlias = true
-            }
-
-            // Draw bounding boxes for each face
+            // Draw bounding boxes by modifying Y plane (luminance)
+            // We'll draw simple rectangles by setting pixels to max brightness (255)
             for (face in faces) {
                 val bbox = face.boundingBox
+                val thickness = 3
                 
-                // Draw rectangle
-                canvas.drawRect(bbox, facePaint)
-
-                // Draw corner markers
-                val cornerSize = 20f
-                val left = bbox.left.toFloat()
-                val top = bbox.top.toFloat()
-                val right = bbox.right.toFloat()
-                val bottom = bbox.bottom.toFloat()
-
-                // Top-left corner
-                canvas.drawLine(left, top, left + cornerSize, top, cornerPaint)
-                canvas.drawLine(left, top, left, top + cornerSize, cornerPaint)
-
-                // Top-right corner
-                canvas.drawLine(right, top, right - cornerSize, top, cornerPaint)
-                canvas.drawLine(right, top, right, top + cornerSize, cornerPaint)
-
-                // Bottom-left corner
-                canvas.drawLine(left, bottom, left + cornerSize, bottom, cornerPaint)
-                canvas.drawLine(left, bottom, left, bottom - cornerSize, cornerPaint)
-
-                // Bottom-right corner
-                canvas.drawLine(right, bottom, right - cornerSize, bottom, cornerPaint)
-                canvas.drawLine(right, bottom, right, bottom - cornerSize, cornerPaint)
-
-                // Draw center point
-                canvas.drawCircle(bbox.centerX().toFloat(), bbox.centerY().toFloat(), 8f, centerPaint)
-            }
-
-            // Step 3: Convert bitmap back to I420
-            val pixels = IntArray(width * height)
-            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-
-            // Create I420 buffer from ARGB pixels
-            val ySize = width * height
-            val uvSize = (width / 2) * (height / 2)
-            val yBuffer = ByteBuffer.allocateDirect(ySize)
-            val uBuffer = ByteBuffer.allocateDirect(uvSize)
-            val vBuffer = ByteBuffer.allocateDirect(uvSize)
-
-            // Convert ARGB to I420
-            for (j in 0 until height) {
-                for (i in 0 until width) {
-                    val pixel = pixels[j * width + i]
-                    val r = (pixel shr 16) and 0xFF
-                    val g = (pixel shr 8) and 0xFF
-                    val b = pixel and 0xFF
-
-                    // RGB to YUV conversion
-                    val y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
-                    yBuffer.put((y.coerceIn(0, 255)).toByte())
-
-                    if (j % 2 == 0 && i % 2 == 0) {
-                        val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
-                        val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                        uBuffer.put((u.coerceIn(0, 255)).toByte())
-                        vBuffer.put((v.coerceIn(0, 255)).toByte())
+                // Ensure coordinates are within bounds
+                val left = bbox.left.coerceIn(0, width - 1)
+                val top = bbox.top.coerceIn(0, height - 1)
+                val right = bbox.right.coerceIn(0, width - 1)
+                val bottom = bbox.bottom.coerceIn(0, height - 1)
+                
+                // Draw horizontal lines (top and bottom)
+                for (t in 0 until thickness) {
+                    for (x in left..right) {
+                        // Top line
+                        if (top + t < height) {
+                            newYBuffer.put((top + t) * width + x, 255.toByte())
+                        }
+                        // Bottom line
+                        if (bottom - t >= 0 && bottom - t < height) {
+                            newYBuffer.put((bottom - t) * width + x, 255.toByte())
+                        }
+                    }
+                }
+                
+                // Draw vertical lines (left and right)
+                for (t in 0 until thickness) {
+                    for (y in top..bottom) {
+                        // Left line
+                        if (left + t < width && y < height) {
+                            newYBuffer.put(y * width + (left + t), 255.toByte())
+                        }
+                        // Right line
+                        if (right - t >= 0 && right - t < width && y < height) {
+                            newYBuffer.put(y * width + (right - t), 255.toByte())
+                        }
+                    }
+                }
+                
+                // Draw center dot
+                val centerX = bbox.centerX().coerceIn(0, width - 1)
+                val centerY = bbox.centerY().coerceIn(0, height - 1)
+                val dotSize = 5
+                
+                for (dy in -dotSize..dotSize) {
+                    for (dx in -dotSize..dotSize) {
+                        val x = (centerX + dx).coerceIn(0, width - 1)
+                        val y = (centerY + dy).coerceIn(0, height - 1)
+                        if (dx * dx + dy * dy <= dotSize * dotSize) {
+                            newYBuffer.put(y * width + x, 255.toByte())
+                        }
                     }
                 }
             }
 
-            yBuffer.rewind()
-            uBuffer.rewind()
-            vBuffer.rewind()
-
+            // Create new I420 buffer with modified data
+            newYBuffer.rewind()
+            newUBuffer.rewind()
+            newVBuffer.rewind()
+            
             val newI420Buffer = JavaI420Buffer.wrap(
                 width, height,
-                yBuffer, width,
-                uBuffer, width / 2,
-                vBuffer, width / 2,
+                newYBuffer, width,
+                newUBuffer, width / 2,
+                newVBuffer, width / 2,
                 null
             )
 
             val newFrame = VideoFrame(newI420Buffer, rotation, timestampNs)
             
-            // Clean up
-            bitmap.recycle()
+            // Release original buffer
             i420Buffer.release()
 
             return newFrame
