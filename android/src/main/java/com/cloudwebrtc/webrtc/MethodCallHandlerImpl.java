@@ -605,6 +605,14 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
         result.success(null);
         break;
       }
+      // NEW ADDITION START - Enable/disable face detection overlay
+      case "setFaceDetectionOverlay": {
+        Boolean enabled = call.argument("enabled");
+        setFaceDetectionOverlay(enabled != null ? enabled : false);
+        result.success(null);
+        break;
+      }
+      // NEW ADDITION END
       case "mediaStreamAddTrack": {
         String streamId = call.argument("streamId");
         String trackId = call.argument("trackId");
@@ -2410,4 +2418,20 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
             activity,
             permissions.toArray(new String[permissions.size()]), callback);
   }
+
+  // NEW ADDITION START - Enable/disable face detection overlay on video stream
+  private void setFaceDetectionOverlay(boolean enabled) {
+    try {
+      MlVideoProcessor processor = getUserMediaImpl.getCurrentMlVideoProcessor();
+      if (processor != null) {
+        processor.setOverlayEnabled(enabled);
+        Log.i(TAG, "Face detection overlay " + (enabled ? "enabled" : "disabled"));
+      } else {
+        Log.w(TAG, "No MlVideoProcessor found - face detection may not be initialized");
+      }
+    } catch (Exception e) {
+      Log.e(TAG, "Failed to set face detection overlay", e);
+    }
+  }
+  // NEW ADDITION END
 }
