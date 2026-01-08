@@ -276,24 +276,30 @@ class MlVideoProcessor(
             val newVBuffer = ByteBuffer.allocateDirect(uvSize)
             
             // Copy original data row by row (respecting stride)
-            yPlane.position(0)
+            // Y plane
             for (row in 0 until height) {
-                yPlane.position(row * yStride)
-                yPlane.limit(row * yStride + width)
+                val srcPos = row * yStride
+                yPlane.limit(yPlane.capacity()) // Reset limit first
+                yPlane.position(srcPos)
+                yPlane.limit(srcPos + width)
                 newYBuffer.put(yPlane)
             }
             
-            uPlane.position(0)
+            // U plane
             for (row in 0 until chromaHeight) {
-                uPlane.position(row * uStride)
-                uPlane.limit(row * uStride + chromaWidth)
+                val srcPos = row * uStride
+                uPlane.limit(uPlane.capacity()) // Reset limit first
+                uPlane.position(srcPos)
+                uPlane.limit(srcPos + chromaWidth)
                 newUBuffer.put(uPlane)
             }
             
-            vPlane.position(0)
+            // V plane
             for (row in 0 until chromaHeight) {
-                vPlane.position(row * vStride)
-                vPlane.limit(row * vStride + chromaWidth)
+                val srcPos = row * vStride
+                vPlane.limit(vPlane.capacity()) // Reset limit first
+                vPlane.position(srcPos)
+                vPlane.limit(srcPos + chromaWidth)
                 newVBuffer.put(vPlane)
             }
             
