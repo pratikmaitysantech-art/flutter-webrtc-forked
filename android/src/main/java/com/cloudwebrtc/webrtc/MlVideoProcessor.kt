@@ -316,50 +316,23 @@ class MlVideoProcessor(
                 val bbox = face.boundingBox
                 val thickness = 3
                 
-                // MODIFIED: Transform coordinates based on rotation
-                // ML Kit gives coordinates for the rotated image, we need buffer coordinates
-                val (left, top, right, bottom) = when (rotation) {
-                    0 -> {
-                        // No rotation
-                        Quad(
-                            bbox.left,
-                            bbox.top,
-                            bbox.right,
-                            bbox.bottom
-                        )
-                    }
-                    90 -> {
-                        // Rotated 90° clockwise: x' = y, y' = width - x
-                        Quad(
-                            bbox.top,
-                            width - bbox.right,
-                            bbox.bottom,
-                            width - bbox.left
-                        )
-                    }
-                    180 -> {
-                        // Rotated 180°: x' = width - x, y' = height - y
-                        Quad(
-                            width - bbox.right,
-                            height - bbox.bottom,
-                            width - bbox.left,
-                            height - bbox.top
-                        )
-                    }
-                    270 -> {
-                        // Rotated 270° clockwise (or 90° counter-clockwise)
-                        // x' = height - y, y' = x
-                        Quad(
-                            height - bbox.bottom,
-                            bbox.left,
-                            height - bbox.top,
-                            bbox.right
-                        )
-                    }
-                    else -> {
-                        Log.w(TAG, "Unknown rotation: $rotation, using bbox as-is")
-                        Quad(bbox.left, bbox.top, bbox.right, bbox.bottom)
-                    }
+                // DEBUG: Log original ML Kit coordinates and frame dimensions
+                if (frameCount % 30L == 0L) {
+                    Log.d(TAG, "ML Kit bbox: (${bbox.left}, ${bbox.top}, ${bbox.right}, ${bbox.bottom}), rotation=$rotation, buffer=${width}x${height}")
+                }
+                
+                // MODIFIED: Since we pass rotation=0 to ML Kit, it gives us coordinates
+                // directly in the buffer space - no transformation needed!
+                val (left, top, right, bottom) = Quad(
+                    bbox.left,
+                    bbox.top,
+                    bbox.right,
+                    bbox.bottom
+                )
+                
+                // DEBUG: Log transformed coordinates
+                if (frameCount % 30L == 0L) {
+                    Log.d(TAG, "Transformed bbox: ($left, $top, $right, $bottom)")
                 }
                 
                 // Ensure coordinates are within bounds after transformation
@@ -542,13 +515,14 @@ class MlVideoProcessor(
             }
         }
 
-        // MODIFIED: Use the actual rotation from the camera frame
-        // ML Kit handles rotation internally and adjusts face coordinates accordingly
+        // MODIFIED: Pass rotation=0 to ML Kit so it gives us coordinates in actual buffer space
+        // We'll handle the display rotation in the UI layer if needed
+        // This way, bbox coordinates directly map to the I420 buffer coordinates
         return InputImage.fromByteArray(
             cleanedArray,
             width,
             height,
-            normalizedRotation,
+            0,  // Always use 0 rotation - gives us coordinates in buffer space
             ImageFormat.NV21
         )
     }
