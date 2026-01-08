@@ -308,20 +308,13 @@ class MlVideoProcessor(
             }
         }
 
-        // MODIFIED: Try with rotation=0 first to test if rotation is the issue
-        // ML Kit should handle rotation, but let's test with 0 to isolate the problem
-        val testRotation = if (frameCount < 10L) {
-            Log.d(TAG, "🧪 TEST MODE: Using rotation=0 for first 10 frames to test detection")
-            0
-        } else {
-            normalizedRotation
-        }
-
+        // MODIFIED: Use the actual rotation from the camera frame
+        // ML Kit handles rotation internally and adjusts face coordinates accordingly
         return InputImage.fromByteArray(
             cleanedArray,
             width,
             height,
-            testRotation,
+            normalizedRotation,
             ImageFormat.NV21
         )
     }
