@@ -13,6 +13,7 @@ import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.util.Log
 
 import com.cloudwebrtc.webrtc.video.LocalVideoTrack
@@ -152,6 +153,9 @@ class MlVideoProcessor(
                     
                     listener?.onFacesDetected(faces, frame)
 
+                    // MODIFIED: Send face data to Flutter
+                    sendFaceDataToFlutter(faces, width, height)
+
                     // This is the hook where mask rendering can be implemented
                     // using OpenGL or Canvas with the detection results.
                     //
@@ -171,6 +175,9 @@ class MlVideoProcessor(
                         Log.d(TAG, "No faces detected (checked $noFaceCount frames, frame size: ${width}x${height})")
                     }
                     listener?.onNoFacesDetected(frame)
+                    
+                    // MODIFIED: Send "no faces" event to Flutter
+                    sendNoFacesToFlutter()
                 }
             }
             .addOnFailureListener { e ->
@@ -318,6 +325,77 @@ class MlVideoProcessor(
             ImageFormat.NV21
         )
     }
+
+    // NEW ADDITION START - Methods to send face data to Flutter via EventChannel
+    /**
+     * Sends face detection data to Flutter via the EventChannel.
+     * Data format: { "faces": [ { "left": x, "top": y, "right": x, "bottom": y }, ... ], "frameWidth": w, "frameHeight": h }
+     */
+    private fun sendFaceDataToFlutter(faces: List<Face>, frameWidth: Int, frameHeight: Int) {
+        val sink = FlutterWebRTCPlugin.faceDetectionEventSink
+        if (sink == null) {
+            // Log only occasionally to avoid spam
+            if (frameCount % 120L == 0L) {
+                Log.d(TAG, "Face detection event sink is null - Flutter may not be listening yet")
+            }
+            return
+        }
+
+        try {
+            val data = mutableMapOf<String, Any>()
+            data["type"] = "faces"
+            data["frameWidth"] = frameWidth
+            data["frameHeight"] = frameHeight
+            
+            val facesList = mutableListOf<Map<String, Any>>()
+            for (face in faces) {
+                val bbox = face.boundingBox
+                val faceData = mutableMapOf<String, Any>()
+                faceData["left"] = bbox.left
+                faceData["top"] = bbox.top
+                faceData["right"] = bbox.right
+                faceData["bottom"] = bbox.bottom
+                faceData["width"] = bbox.width()
+                faceData["height"] = bbox.height()
+                
+                // Add tracking ID if available
+                face.trackingId?.let { faceData["trackingId"] = it }
+                
+                facesList.add(faceData)
+            }
+            
+            data["faces"] = facesList
+            
+            // Send event on main thread as required by Flutter
+            Handler(Looper.getMainLooper()).post {
+                sink.success(data)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending face data to Flutter", e)
+        }
+    }
+
+    /**
+     * Sends a "no faces" event to Flutter.
+     */
+    private fun sendNoFacesToFlutter() {
+        val sink = FlutterWebRTCPlugin.faceDetectionEventSink ?: return
+
+        try {
+            val data = mutableMapOf<String, Any>()
+            data["type"] = "noFaces"
+            
+            // Only send "no faces" event occasionally to avoid spam
+            if (noFaceCount % 30L == 0L) {
+                Handler(Looper.getMainLooper()).post {
+                    sink.success(data)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending no-faces event to Flutter", e)
+        }
+    }
+    // NEW ADDITION END
 
     /**
      * Should be called when camera capture is stopped to cleanly shut down
