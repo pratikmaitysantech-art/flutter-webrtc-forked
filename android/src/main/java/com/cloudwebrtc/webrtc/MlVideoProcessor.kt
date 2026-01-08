@@ -280,7 +280,7 @@ class MlVideoProcessor(
             // Y plane
             for (row in 0 until height) {
                 val srcPos = row * yStride
-                yPlane.limit(yPlane.capacity()) // Reset limit first
+                yPlane.clear() // Reset position to 0 and limit to capacity
                 yPlane.position(srcPos)
                 yPlane.limit(srcPos + width)
                 newYBuffer.put(yPlane)
@@ -289,7 +289,7 @@ class MlVideoProcessor(
             // U plane
             for (row in 0 until chromaHeight) {
                 val srcPos = row * uStride
-                uPlane.limit(uPlane.capacity()) // Reset limit first
+                uPlane.clear() // Reset position to 0 and limit to capacity
                 uPlane.position(srcPos)
                 uPlane.limit(srcPos + chromaWidth)
                 newUBuffer.put(uPlane)
@@ -298,7 +298,7 @@ class MlVideoProcessor(
             // V plane
             for (row in 0 until chromaHeight) {
                 val srcPos = row * vStride
-                vPlane.limit(vPlane.capacity()) // Reset limit first
+                vPlane.clear() // Reset position to 0 and limit to capacity
                 vPlane.position(srcPos)
                 vPlane.limit(srcPos + chromaWidth)
                 newVBuffer.put(vPlane)
