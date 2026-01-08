@@ -1,5 +1,12 @@
 package com.cloudwebrtc.webrtc;
 
+/* CHANGES LOG:
+ * 1. Added: Face detection event channel support for streaming face detection data to Flutter
+ * 2. Added: faceDetectionEventChannel and faceDetectionEventSink variables
+ * 3. Modified: startListening() to register the "FlutterWebRTC/faceDetection" EventChannel
+ * 4. Modified: stopListening() to clean up face detection event channel resources
+ */
+
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
@@ -41,11 +48,17 @@ public class FlutterWebRTCPlugin implements FlutterPlugin, ActivityAware, EventC
     private LifeCycleObserver observer;
     private Lifecycle lifecycle;
     private EventChannel eventChannel;
+    // NEW ADDITION START - Face detection event channel
+    private EventChannel faceDetectionEventChannel;
+    // NEW ADDITION END
 
     // eventSink is static because FlutterWebRTCPlugin can be instantiated multiple times
     // but the onListen(Object, EventChannel.EventSink) event only fires once for the first
     // FlutterWebRTCPlugin instance, so for the next instances eventSink will be == null
     public static EventChannel.EventSink eventSink;
+    // NEW ADDITION START - Face detection event sink (static for same reason as eventSink)
+    public static EventChannel.EventSink faceDetectionEventSink;
+    // NEW ADDITION END
 
     public FlutterWebRTCPlugin() {
         sharedSingleton = this;
@@ -118,6 +131,22 @@ public class FlutterWebRTCPlugin implements FlutterPlugin, ActivityAware, EventC
         methodChannel.setMethodCallHandler(methodCallHandler);
         eventChannel = new EventChannel( messenger,"FlutterWebRTC.Event");
         eventChannel.setStreamHandler(this);
+        // NEW ADDITION START - Register face detection event channel
+        faceDetectionEventChannel = new EventChannel(messenger, "FlutterWebRTC/faceDetection");
+        faceDetectionEventChannel.setStreamHandler(new EventChannel.StreamHandler() {
+            @Override
+            public void onListen(Object arguments, EventChannel.EventSink events) {
+                faceDetectionEventSink = new AnyThreadSink(events);
+                Log.d(TAG, "Face detection event channel listener attached");
+            }
+
+            @Override
+            public void onCancel(Object arguments) {
+                faceDetectionEventSink = null;
+                Log.d(TAG, "Face detection event channel listener cancelled");
+            }
+        });
+        // NEW ADDITION END
         AudioSwitchManager.instance.audioDeviceChangeListener = (devices, currentDevice) -> {
             Log.w(TAG, "audioFocusChangeListener " + devices+ " " + currentDevice);
             ConstraintsMap params = new ConstraintsMap();
@@ -132,6 +161,13 @@ public class FlutterWebRTCPlugin implements FlutterPlugin, ActivityAware, EventC
         methodCallHandler = null;
         methodChannel.setMethodCallHandler(null);
         eventChannel.setStreamHandler(null);
+        // NEW ADDITION START - Clean up face detection event channel
+        if (faceDetectionEventChannel != null) {
+            faceDetectionEventChannel.setStreamHandler(null);
+            faceDetectionEventChannel = null;
+        }
+        faceDetectionEventSink = null;
+        // NEW ADDITION END
         if (AudioSwitchManager.instance != null) {
             Log.d(TAG, "Stopping the audio manager...");
             AudioSwitchManager.instance.stop();
