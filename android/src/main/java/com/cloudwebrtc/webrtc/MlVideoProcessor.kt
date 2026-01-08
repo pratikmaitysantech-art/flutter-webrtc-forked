@@ -126,30 +126,26 @@ class MlVideoProcessor(
             processFrame(inputImage, frame, width, height)
         }
 
-        // NEW ADDITION START - Draw overlay on frame if enabled and faces detected
-        val processedFrame = if (enableOverlay) {
-            val faces = latestFaces.get()
-            if (faces.isNotEmpty()) {
+        // NEW ADDITION START - Always draw overlay locally, conditionally for remote
+        // Check if we have faces to draw
+        val faces = latestFaces.get()
+        val processedFrame = if (faces.isNotEmpty()) {
+            try {
+                // i420 will be released inside drawOverlayOnFrame
+                drawOverlayOnFrame(i420, faces, rotation, frame.timestampNs)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to draw overlay on frame", e)
+                // Only release if drawOverlayOnFrame threw an exception before releasing
                 try {
-                    // i420 will be released inside drawOverlayOnFrame
-                    drawOverlayOnFrame(i420, faces, rotation, frame.timestampNs)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to draw overlay on frame", e)
-                    // Only release if drawOverlayOnFrame threw an exception before releasing
-                    try {
-                        i420.release()
-                    } catch (ignored: Exception) {
-                        // Already released, ignore
-                    }
-                    frame // Return original frame on error
+                    i420.release()
+                } catch (ignored: Exception) {
+                    // Already released, ignore
                 }
-            } else {
-                i420.release()
-                frame // No faces, return original
+                frame // Return original frame on error
             }
         } else {
             i420.release()
-            frame // Overlay disabled, return original
+            frame // No faces, return original
         }
         // NEW ADDITION END
 
