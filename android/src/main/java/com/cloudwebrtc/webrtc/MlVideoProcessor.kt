@@ -34,6 +34,11 @@ import java.util.Arrays
 import java.util.concurrent.atomic.AtomicReference
 
 /**
+ * NEW ADDITION: Helper data class for transformed bounding box coordinates
+ */
+private data class Quad(val left: Int, val top: Int, val right: Int, val bottom: Int)
+
+/**
  * NEW ADDITION:
  * Lightweight face-detection processor that plugs into the existing LocalVideoTrack
  * external processing pipeline. It runs ML Kit face detection on a separate thread so
@@ -304,48 +309,96 @@ class MlVideoProcessor(
             newVBuffer.rewind()
 
             // Draw bounding boxes by modifying Y plane (luminance)
-            // We'll draw simple rectangles by setting pixels to max brightness (255)
+            // IMPORTANT: ML Kit returns coordinates in the rotated image space,
+            // but we need to draw on the actual I420 buffer which is in landscape
+            // We must transform coordinates based on rotation
             for (face in faces) {
                 val bbox = face.boundingBox
                 val thickness = 3
                 
-                // Ensure coordinates are within bounds
-                val left = bbox.left.coerceIn(0, width - 1)
-                val top = bbox.top.coerceIn(0, height - 1)
-                val right = bbox.right.coerceIn(0, width - 1)
-                val bottom = bbox.bottom.coerceIn(0, height - 1)
+                // MODIFIED: Transform coordinates based on rotation
+                // ML Kit gives coordinates for the rotated image, we need buffer coordinates
+                val (left, top, right, bottom) = when (rotation) {
+                    0 -> {
+                        // No rotation
+                        Quad(
+                            bbox.left,
+                            bbox.top,
+                            bbox.right,
+                            bbox.bottom
+                        )
+                    }
+                    90 -> {
+                        // Rotated 90° clockwise: x' = y, y' = width - x
+                        Quad(
+                            bbox.top,
+                            width - bbox.right,
+                            bbox.bottom,
+                            width - bbox.left
+                        )
+                    }
+                    180 -> {
+                        // Rotated 180°: x' = width - x, y' = height - y
+                        Quad(
+                            width - bbox.right,
+                            height - bbox.bottom,
+                            width - bbox.left,
+                            height - bbox.top
+                        )
+                    }
+                    270 -> {
+                        // Rotated 270° clockwise (or 90° counter-clockwise)
+                        // x' = height - y, y' = x
+                        Quad(
+                            height - bbox.bottom,
+                            bbox.left,
+                            height - bbox.top,
+                            bbox.right
+                        )
+                    }
+                    else -> {
+                        Log.w(TAG, "Unknown rotation: $rotation, using bbox as-is")
+                        Quad(bbox.left, bbox.top, bbox.right, bbox.bottom)
+                    }
+                }
+                
+                // Ensure coordinates are within bounds after transformation
+                val leftClamped = left.coerceIn(0, width - 1)
+                val topClamped = top.coerceIn(0, height - 1)
+                val rightClamped = right.coerceIn(0, width - 1)
+                val bottomClamped = bottom.coerceIn(0, height - 1)
                 
                 // Draw horizontal lines (top and bottom)
                 for (t in 0 until thickness) {
-                    for (x in left..right) {
+                    for (x in leftClamped..rightClamped) {
                         // Top line
-                        if (top + t < height) {
-                            newYBuffer.put((top + t) * width + x, 255.toByte())
+                        if (topClamped + t < height) {
+                            newYBuffer.put((topClamped + t) * width + x, 255.toByte())
                         }
                         // Bottom line
-                        if (bottom - t >= 0 && bottom - t < height) {
-                            newYBuffer.put((bottom - t) * width + x, 255.toByte())
+                        if (bottomClamped - t >= 0 && bottomClamped - t < height) {
+                            newYBuffer.put((bottomClamped - t) * width + x, 255.toByte())
                         }
                     }
                 }
                 
                 // Draw vertical lines (left and right)
                 for (t in 0 until thickness) {
-                    for (y in top..bottom) {
+                    for (y in topClamped..bottomClamped) {
                         // Left line
-                        if (left + t < width && y < height) {
-                            newYBuffer.put(y * width + (left + t), 255.toByte())
+                        if (leftClamped + t < width && y < height) {
+                            newYBuffer.put(y * width + (leftClamped + t), 255.toByte())
                         }
                         // Right line
-                        if (right - t >= 0 && right - t < width && y < height) {
-                            newYBuffer.put(y * width + (right - t), 255.toByte())
+                        if (rightClamped - t >= 0 && rightClamped - t < width && y < height) {
+                            newYBuffer.put(y * width + (rightClamped - t), 255.toByte())
                         }
                     }
                 }
                 
-                // Draw center dot
-                val centerX = bbox.centerX().coerceIn(0, width - 1)
-                val centerY = bbox.centerY().coerceIn(0, height - 1)
+                // Draw center dot (use transformed coordinates)
+                val centerX = ((leftClamped + rightClamped) / 2).coerceIn(0, width - 1)
+                val centerY = ((topClamped + bottomClamped) / 2).coerceIn(0, height - 1)
                 val dotSize = 5
                 
                 for (dy in -dotSize..dotSize) {
