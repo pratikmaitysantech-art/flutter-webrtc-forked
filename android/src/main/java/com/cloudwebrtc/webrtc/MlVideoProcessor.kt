@@ -131,10 +131,16 @@ class MlVideoProcessor(
             val faces = latestFaces.get()
             if (faces.isNotEmpty()) {
                 try {
+                    // i420 will be released inside drawOverlayOnFrame
                     drawOverlayOnFrame(i420, faces, rotation, frame.timestampNs)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to draw overlay on frame", e)
-                    i420.release()
+                    // Only release if drawOverlayOnFrame threw an exception before releasing
+                    try {
+                        i420.release()
+                    } catch (ignored: Exception) {
+                        // Already released, ignore
+                    }
                     frame // Return original frame on error
                 }
             } else {
@@ -255,23 +261,41 @@ class MlVideoProcessor(
             val yPlane = i420Buffer.dataY
             val uPlane = i420Buffer.dataU
             val vPlane = i420Buffer.dataV
+            val yStride = i420Buffer.strideY
+            val uStride = i420Buffer.strideU
+            val vStride = i420Buffer.strideV
             
-            // Copy buffers so we can modify them
+            // Calculate actual buffer sizes
             val ySize = width * height
-            val uvSize = ((width + 1) / 2) * ((height + 1) / 2)
+            val chromaWidth = (width + 1) / 2
+            val chromaHeight = (height + 1) / 2
+            val uvSize = chromaWidth * chromaHeight
             
             val newYBuffer = ByteBuffer.allocateDirect(ySize)
             val newUBuffer = ByteBuffer.allocateDirect(uvSize)
             val newVBuffer = ByteBuffer.allocateDirect(uvSize)
             
-            // Copy original data
+            // Copy original data row by row (respecting stride)
             yPlane.position(0)
-            uPlane.position(0)
-            vPlane.position(0)
+            for (row in 0 until height) {
+                yPlane.position(row * yStride)
+                yPlane.limit(row * yStride + width)
+                newYBuffer.put(yPlane)
+            }
             
-            newYBuffer.put(yPlane)
-            newUBuffer.put(uPlane)
-            newVBuffer.put(vPlane)
+            uPlane.position(0)
+            for (row in 0 until chromaHeight) {
+                uPlane.position(row * uStride)
+                uPlane.limit(row * uStride + chromaWidth)
+                newUBuffer.put(uPlane)
+            }
+            
+            vPlane.position(0)
+            for (row in 0 until chromaHeight) {
+                vPlane.position(row * vStride)
+                vPlane.limit(row * vStride + chromaWidth)
+                newVBuffer.put(vPlane)
+            }
             
             newYBuffer.rewind()
             newUBuffer.rewind()
@@ -341,8 +365,8 @@ class MlVideoProcessor(
             val newI420Buffer = JavaI420Buffer.wrap(
                 width, height,
                 newYBuffer, width,
-                newUBuffer, width / 2,
-                newVBuffer, width / 2,
+                newUBuffer, chromaWidth,
+                newVBuffer, chromaWidth,
                 null
             )
 
